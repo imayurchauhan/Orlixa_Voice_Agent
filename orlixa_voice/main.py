@@ -40,8 +40,8 @@ def main():
         executor = TaskExecutor(tts)
 
         tts.speak(f"{config.ASSISTANT_NAME} is online and ready.")
-
         command_queue = []
+        observation = None
 
         def text_input_thread():
             while True:
@@ -85,37 +85,76 @@ def main():
             logger.info(f"Received command: {command}")
             memory.log_command(command, "Received")
             
-            tts.speak("Thinking...")
+            # Always take a fresh look at the screen before planning
+            observation = executor.get_current_observation()
             
-            # Plan
-            plan = planner.plan_task(command)
-            if not plan:
-                tts.speak("I'm sorry, I encountered an error while planning.")
-                memory.log_command(command, "Error Planning")
-                continue
+            try:
+                tts.speak("Thinking...")
+            except:
+                pass
             
-            steps = plan.get("steps", [])
-            chat_msg = plan.get("chat_response", "")
+            # Reasoning Loop
+            MAX_LOOPS = 5
+            last_action = None
             
-            # Speak chat response if present
-            if chat_msg:
-                tts.speak(chat_msg)
+            for loop_count in range(MAX_LOOPS):
+                logger.info(f"Reasoning Loop {loop_count + 1}/{MAX_LOOPS}")
                 
-            # If no steps, we are done (it was just a conversation)
-            if not steps:
-                memory.log_command(command, "Conversational")
-                continue
+                # Plan
+                plan = planner.plan_task(command, observation, last_action, turn=loop_count + 1)
+                if not plan:
+                    try:
+                        tts.speak("I'm sorry, I encountered an error while planning.")
+                    except:
+                        pass
+                    memory.log_command(command, "Error Planning")
+                    break
                 
-            # Parse & Validate Steps
-            valid_steps = parser.parse_and_validate(steps)
-            if not valid_steps:
-                tts.speak("I'm sorry, the generated steps were invalid.")
-                memory.log_command(command, "Invalid Steps")
-                continue
+                steps = plan.get("steps", [])
+                chat_msg = plan.get("chat_response", "")
                 
-            # Execute
-            executor.execute_steps(valid_steps)
-            memory.log_command(command, "Executed")
+                # Speak chat response if present
+                if chat_msg:
+                    print(f"\n[ORLIXA] {chat_msg}")
+                    try:
+                        tts.speak(chat_msg)
+                    except:
+                        logger.error("TTS failed but continuing loop.")
+                    
+                # If reasoning exists, log it
+                reasoning = plan.get("reasoning", "")
+                if reasoning:
+                    logger.info(f"AI Reasoning: {reasoning}")
+                    print(f"[REASONING] {reasoning}")
+                    
+                # If no steps or status is Completed, we are done
+                status = plan.get("status", "In Progress")
+                if not steps or status == "Completed":
+                    memory.log_command(command, "Completed")
+                    break
+                    
+                # Parse & Validate Steps
+                valid_steps = parser.parse_and_validate(steps)
+                if not valid_steps:
+                    try:
+                        tts.speak("I'm sorry, the generated steps were invalid.")
+                    except:
+                        pass
+                    memory.log_command(command, "Invalid Steps")
+                    break
+                    
+                # Execute and get new observation
+                observation = executor.execute_steps(valid_steps)
+                
+                # Record the last action taken for the next loop turn
+                if valid_steps:
+                    last_action = valid_steps[-1].get("action")
+                
+                memory.log_command(command, f"Executed")
+                
+                # DONE! Steps ran successfully. Stop the loop.
+                # The user will give the next command manually.
+                break
 
     except KeyboardInterrupt:
         logger.info("Application stopped by user (Ctrl+C).")

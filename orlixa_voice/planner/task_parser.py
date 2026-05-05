@@ -29,6 +29,12 @@ class TaskParser:
                 logger.error(f"Step {index} is not a dictionary: {step}")
                 continue
                 
+            # Flatten params or arguments if they exist
+            if "params" in step and isinstance(step["params"], dict):
+                step.update(step.pop("params"))
+            if "arguments" in step and isinstance(step["arguments"], dict):
+                step.update(step.pop("arguments"))
+                
             action = step.get("action")
             if not action or action not in self.valid_actions:
                 logger.error(f"Invalid or missing action in step {index}: {step}")

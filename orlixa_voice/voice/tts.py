@@ -1,11 +1,17 @@
 import pyttsx3
 from utils.logger import get_logger
 import config
+import threading
+import time
 
 logger = get_logger()
 
 class TextToSpeech:
     def __init__(self):
+        self.lock = threading.Lock()
+        self._init_engine()
+
+    def _init_engine(self):
         try:
             self.engine = pyttsx3.init()
             self.engine.setProperty('rate', config.VOICE_RATE)
@@ -15,22 +21,28 @@ class TextToSpeech:
             self.engine = None
 
     def speak(self, text):
-        if not self.engine:
-            logger.warning("TTS engine is not initialized. Attempting re-init...")
+        if not text:
+            return
+            
+        with self.lock:
+            if not self.engine:
+                self._init_engine()
+                if not self.engine:
+                    return
+
             try:
-                self.engine = pyttsx3.init()
-            except:
-                return
-        
-        try:
-            logger.info(f"{config.ASSISTANT_NAME}: {text}")
-            self.engine.say(text)
-            self.engine.runAndWait()
-        except Exception as e:
-            logger.error(f"Error during TTS speak: {e}")
-            # If a pipe error occurs, the engine state might be corrupted.
-            # Resetting the engine can sometimes help for the next call.
-            try:
-                self.engine = pyttsx3.init()
-            except:
-                self.engine = None
+                logger.info(f"{config.ASSISTANT_NAME}: {text}")
+                self.engine.say(text)
+                self.engine.runAndWait()
+                # Small pause to ensure the engine pipe is cleared
+                time.sleep(0.1)
+            except Exception as e:
+                logger.error(f"Error during TTS speak: {e}")
+                # Reset engine on failure
+                self._init_engine()
+                try:
+                    # Final attempt
+                    self.engine.say(text)
+                    self.engine.runAndWait()
+                except:
+                    pass

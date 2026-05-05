@@ -8,3 +8,18 @@ database/*.sqlite
 .env
 .vscode/
 .idea/
+
+# Browser session data (Playwright persistent context)
+browser_data/
+
+# Whisper model cache
+*.pt
+*.bin
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Temp/scratch files
+*.tmp
+*.log

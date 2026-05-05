@@ -13,8 +13,15 @@ class TaskExecutor:
         self.safety = SafetyConfirmation(tts_engine)
         self.tts = tts_engine
 
+    def get_current_observation(self):
+        """Returns the current state of the browser or desktop as an observation."""
+        if self.browser.page and not self.browser.page.is_closed():
+            return self.browser.get_page_content()
+        return "Browser is not open. Desktop is active."
+
     def execute_steps(self, steps):
         logger.info(f"Executing {len(steps)} steps.")
+        last_success = True
         
         for index, step in enumerate(steps):
             action = step.get("action")
@@ -27,6 +34,7 @@ class TaskExecutor:
                     logger.info(f"Action {action} aborted by user.")
                     if self.tts:
                         self.tts.speak("Action cancelled.")
+                    last_success = False
                     break # Stop executing further steps if dangerous action is cancelled
 
             success, message = self._run_action(step)
@@ -34,25 +42,31 @@ class TaskExecutor:
             if success:
                 logger.info(message)
                 if self.tts:
-                    self.tts.speak("Done.")
+                    try:
+                        self.tts.speak("Done.")
+                    except:
+                        pass
             else:
+                last_success = False
                 logger.error(f"Step failed: {message}")
-                if self.tts:
-                    self.tts.speak(f"Error occurred: {message}. What should I do?")
-                
-                # Wait & Resume logic
-                action_to_take = self._handle_failure()
-                if action_to_take == "skip":
-                    logger.info("Skipping failed step and continuing.")
-                    continue
-                elif action_to_take == "abort":
-                    logger.info("Aborting remaining steps.")
-                    break
-                else:
-                    logger.info("Aborting by default.")
-                    break
+                print(f"[WARN] Step {index+1} failed: {message}. Auto-skipping...")
+                # Auto-skip and continue with remaining steps
+                continue
 
         logger.info("Execution flow finished.")
+        
+        # Capture observation for the next planning turn
+        observation = ""
+        if last_success:
+            # If we were in browser, get page content
+            if self.browser.page and not self.browser.page.is_closed():
+                observation = self.browser.get_page_content()
+            else:
+                observation = "Action completed successfully."
+        else:
+            observation = f"The last action failed with message: {message}. Please try a different approach or inform the user."
+            
+        return observation
 
     def _run_action(self, step):
         action = step.get("action")
@@ -77,7 +91,7 @@ class TaskExecutor:
             elif action == "click":
                 return self.browser.click(step.get("selector"))
             elif action == "type":
-                return self.browser.type_text(step.get("selector"), step.get("text"))
+                return self.browser.type(step.get("selector"), step.get("text"))
             elif action == "send_message":
                 return self.desktop.send_message(step.get("contact"), step.get("message"))
             else:
